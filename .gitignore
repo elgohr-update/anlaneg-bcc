@@ -5,6 +5,10 @@
 .idea
 
 # Build artifacts
+.cproject
+.project
+.pydevproject
+.settings/
 /build/
 cmake-build-debug
 debian/**/*.log

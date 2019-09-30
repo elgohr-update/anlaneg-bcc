@@ -142,6 +142,9 @@ class USDT(object):
             raise USDTException(
                     "either a pid or a binary path must be specified")
 
+    def __del__(self):
+        lib.bcc_usdt_close(self.context)
+
     def enable_probe(self, probe, fn_name):
         if lib.bcc_usdt_enable_probe(self.context, probe.encode('ascii'),
                 fn_name.encode('ascii')) != 0:
@@ -165,9 +168,14 @@ tplist tool.""")
     def get_context(self):
         return self.context
 
+    def get_text(self):
+        ctx_array = (ct.c_void_p * 1)()
+        ctx_array[0] = ct.c_void_p(self.context)
+        return lib.bcc_usdt_genargs(ctx_array, 1).decode()
+
     def get_probe_arg_ctype(self, probe_name, arg_index):
         return lib.bcc_usdt_get_probe_argctype(
-            self.context, probe_name, arg_index)
+            self.context, probe_name.encode('ascii'), arg_index).decode()
 
     def enumerate_probes(self):
         probes = []

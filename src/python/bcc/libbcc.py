@@ -1,3 +1,4 @@
+# encoding:utf-8
 # Copyright 2015 PLUMgrid
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +15,7 @@
 
 import ctypes as ct
 
+#加载libbcc.so.0对应的库文件
 lib = ct.CDLL("libbcc.so.0", use_errno=True)
 
 # keep in sync with bcc_common.h
@@ -23,9 +25,13 @@ lib.bpf_module_create_b.argtypes = [ct.c_char_p, ct.c_char_p, ct.c_uint,
 lib.bpf_module_create_c.restype = ct.c_void_p
 lib.bpf_module_create_c.argtypes = [ct.c_char_p, ct.c_uint,
         ct.POINTER(ct.c_char_p), ct.c_int, ct.c_bool, ct.c_char_p]
+#bpf_module_create_c_from_string函数说明
+#此函数返回类型为void*
+#此函数参数为char*,unsigned int,char*,int,bool,char*
 lib.bpf_module_create_c_from_string.restype = ct.c_void_p
 lib.bpf_module_create_c_from_string.argtypes = [ct.c_char_p, ct.c_uint,
         ct.POINTER(ct.c_char_p), ct.c_int, ct.c_bool, ct.c_char_p]
+
 lib.bpf_module_destroy.restype = None
 lib.bpf_module_destroy.argtypes = [ct.c_void_p]
 lib.bpf_module_license.restype = ct.c_char_p

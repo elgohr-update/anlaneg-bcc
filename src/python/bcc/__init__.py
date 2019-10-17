@@ -1,3 +1,4 @@
+# encoding:utf-8
 # Copyright 2015 PLUMgrid
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -291,6 +292,7 @@ class BPF(object):
                                    See "Debug flags" for explanation
         """
 
+        #要编译的源文件
         src_file = _assert_is_bytes(src_file)
         hdr_file = _assert_is_bytes(hdr_file)
         text = _assert_is_bytes(text)

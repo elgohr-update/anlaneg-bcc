@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# encoding:utf-8
 #
 # trace         Trace a function and print a trace message based on its
 #               parameters, with an optional filter.
@@ -692,6 +693,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                   dest="tgid", help="id of the process to trace (optional)")
                 parser.add_argument("-L", "--tid", type=int, metavar="TID",
                   dest="pid", help="id of the thread to trace (optional)")
+                #在执行之前，显示生成的BPF program code
                 parser.add_argument("-v", "--verbose", action="store_true",
                   help="print resulting BPF program code before executing")
                 parser.add_argument("-Z", "--string-size", type=int,
@@ -749,11 +751,14 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
 #include <linux/sched.h>        /* For TASK_COMM_LEN */
 
 """
+                #生成要include的文件
                 for include in (self.args.include or []):
                         if include.startswith((".", "/")):
+                                #非系统包含
                                 include = os.path.abspath(include)
                                 self.program += "#include \"%s\"\n" % include
                         else:
+                                #系统包含
                                 self.program += "#include <%s>\n" % include
                 self.program += BPF.generate_auto_includes(
                         map(lambda p: p.raw_probe, self.probes))
@@ -762,6 +767,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                                         self.args.include_self)
 
                 if self.args.verbose or self.args.ebpf:
+                        #显示要执行的程序
                         print(self.program)
                         if self.args.ebpf:
                                 exit()
@@ -778,6 +784,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                         if self.args.verbose:
                                 print(probe.usdt.get_text())
                         usdt_contexts.append(probe.usdt)
+                #构造BPF程序
                 self.bpf = BPF(text=self.program, usdt_contexts=usdt_contexts)
                 if self.args.sym_file_list is not None:
                   print("Note: Kernel bpf will report stack map with ip/build_id")

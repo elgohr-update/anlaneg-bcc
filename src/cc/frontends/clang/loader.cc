@@ -118,7 +118,7 @@ static int CreateFromArgs(clang::CompilerInvocation &invocation,
 }
 
 int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
-                       const string &file, bool in_memory, const char *cflags[],
+                       const string &file/*待解析的c代码*/, bool in_memory/*文件内容是否在内存*/, const char *cflags[],
                        int ncflags, const std::string &id, FuncSource &func_src,
                        std::string &mod_src,
                        const std::string &maps_ns,
@@ -165,9 +165,11 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
 
   string abs_file;
   if (in_memory) {
-    abs_file = main_path;
+      /*文件内容在内存，创建buffer*/
+    abs_file = main_path;/*使用假的文件名称*/
     main_buf = llvm::MemoryBuffer::getMemBuffer(file);
   } else {
+      /*确定文件的绝对路径*/
     if (file.substr(0, 1) == "/")
       abs_file = file;
     else

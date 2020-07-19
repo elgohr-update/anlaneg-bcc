@@ -30,6 +30,7 @@ extern "C" {
 struct bpf_create_map_attr;
 struct bpf_load_program_attr;
 
+//定义probe附着点类型
 enum bpf_probe_attach_type {
 	BPF_PROBE_ENTRY,
 	BPF_PROBE_RETURN

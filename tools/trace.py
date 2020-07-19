@@ -12,6 +12,7 @@
 # Copyright (C) 2016 Sasha Goldshtein.
 
 from __future__ import print_function
+#见src/python/bcc/__init__.py文件
 from bcc import BPF, USDT
 from functools import partial
 from time import sleep, strftime
@@ -61,12 +62,15 @@ class Probe(object):
         def __init__(self, probe, string_size, kernel_stack, user_stack):
                 self.usdt = None
                 self.streq_functions = ""
+                #将传入的probe字符串赋给raw_probe
                 self.raw_probe = probe
                 self.string_size = string_size
                 self.kernel_stack = kernel_stack
                 self.user_stack = user_stack
                 Probe.probe_count += 1
+                #解析raw格式的probe
                 self._parse_probe()
+                #记录probe的编号
                 self.probe_num = Probe.probe_count
                 self.probe_name = "probe_%s_%d" % \
                                 (self._display_function(), self.probe_num)
@@ -100,17 +104,24 @@ class Probe(object):
                 #                                          opt. signature
                 #                               probespec       |      rest
                 #                               ---------  ----------   --
+                # ([^ \t\(]+) 以非空格,\t,\(开头的多个字每  ==》probe函数名及probe type
+                # (\([^\(]*\))?  一个或零个 \( 字符，零或多个非\(字符 ，一个或零个\)字符 ==> 函数签名
+                # （.*) 任意字符 ==> filter ? + 
                 (spec, sig, rest) = re.match(r'([^ \t\(]+)(\([^\(]*\))?(.*)',
                                              text).groups()
-
+                
+                #确定trace哪部分函数 p,u,t,r及库名称，函数名称
                 self._parse_spec(spec)
+                
                 # Remove the parens
+                # 提取函数签名部分，u,t类型不支持签名方式probe
                 self.signature = sig[1:-1] if sig else None
                 if self.signature and self.probe_type in ['u', 't']:
                         self._bail("USDT and tracepoint probes can't have " +
                                    "a function signature; use arg1, arg2, " +
                                    "... instead")
 
+                #移除剩余字符的左侧空格
                 text = rest.lstrip()
                 # If we now have a (, wait for the balanced closing ) and that
                 # will be the predicate
@@ -123,7 +134,9 @@ class Probe(object):
                                 if text[i] == ")":
                                         balance -= 1
                                 if balance == 0:
+                                        #所有括号均已匹配，开始解析filter
                                         self._parse_filter(text[:i + 1])
+                                        #记录剩余部分
                                         text = text[i + 1:]
                                         break
                         if self.filter is None:
@@ -133,9 +146,11 @@ class Probe(object):
                         self.filter = "1"
 
                 # The remainder of the text is the printf action
+                # 将剩余信息做为action进行解析
                 self._parse_action(text.lstrip())
 
         def _parse_spec(self, spec):
+                #采用':'划分
                 parts = spec.split(":")
                 # Two special cases: 'func' means 'p::func', 'lib:func' means
                 # 'p:lib:func'. Other combinations need to provide an empty
@@ -146,8 +161,10 @@ class Probe(object):
                 elif len(parts) == 2:
                         parts = ["p", parts[0], parts[1]]
                 if len(parts[0]) == 0:
+                        #无::时，默认采用p格式
                         self.probe_type = "p"
                 elif parts[0] in ["p", "r", "t", "u"]:
+                        #当前仅容许四个格式
                         self.probe_type = parts[0]
                 else:
                         self._bail("probe type must be '', 'p', 't', 'r', " +
@@ -184,9 +201,11 @@ class Probe(object):
                 self._bail("unrecognized USDT probe %s" % self.usdt_name)
 
         def _parse_filter(self, filt):
+                #解析给定的filter
                 self.filter = self._rewrite_expr(filt)
 
         def _parse_types(self, fmt):
+                #遍历fmt中的每个match,执行替换，形成最终格式
                 for match in re.finditer(
                             r'[^%]%(s|u|d|lu|llu|ld|lld|hu|hd|x|lx|llx|c|K|U)', fmt):
                         self.types.append(match.group(1))
@@ -202,13 +221,17 @@ class Probe(object):
                 if len(action) == 0:
                         return
 
+                #采用双引号引起来的是format,双引号后面','号分隔的部分为参数列表
                 action = action.strip()
                 match = re.search(r'(\".*?\"),?(.*)', action)
                 if match is None:
                         self._bail("expected format string in \"s")
-
+                
+                #format格式解析
                 self.raw_format = match.group(1)
                 self._parse_types(self.raw_format)
+                
+                #参数列表重写
                 for part in re.split('(?<!"),', match.group(2)):
                         part = self._rewrite_expr(part)
                         if len(part) > 0:
@@ -266,11 +289,14 @@ static inline bool %s(char const *ignored, uintptr_t str) {
                 """ % (fname, string)
                 return fname
 
+        #表达式替换
         def _rewrite_expr(self, expr):
                 if self.is_syscall_kprobe:
+                    #针对系统调用的kprobe,将filter表达式完成替换
                     for alias, replacement in Probe.aliases_indarg.items():
                         expr = expr.replace(alias, replacement)
                 else:
+                    #非系统调用（除u外），完成filter表达式中argsX的替换
                     for alias, replacement in Probe.aliases_arg.items():
                         # For USDT probes, we replace argN values with the
                         # actual arguments for that probe obtained using
@@ -278,8 +304,12 @@ static inline bool %s(char const *ignored, uintptr_t str) {
                         if self.probe_type == "u":
                                 continue
                         expr = expr.replace(alias, replacement)
+                
+                #完成公共变量的替换
                 for alias, replacement in Probe.aliases_common.items():
                     expr = expr.replace(alias, replacement)
+                    
+                #完成match信息的替换
                 if self.bin_cmp:
                     STRCMP_RE = 'STRCMP\\(\"([^"]+)\\"'
                 else:
@@ -456,6 +486,7 @@ BPF_PERF_OUTPUT(%s);
 
                 prefix = ""
                 signature = "struct pt_regs *ctx"
+                #用户指定了签名，则加上对应的签名
                 if self.signature:
                         signature += ", " + self.signature
 
@@ -593,8 +624,10 @@ BPF_PERF_OUTPUT(%s);
 
         def attach(self, bpf, verbose):
                 if len(self.library) == 0:
+                        #kernel函数probe
                         self._attach_k(bpf)
                 else:
+                        #用户态程序probe
                         self._attach_u(bpf)
                 self.python_struct = self._generate_python_data_decl()
                 callback = partial(self.print_event, bpf)
@@ -603,9 +636,11 @@ BPF_PERF_OUTPUT(%s);
 
         def _attach_k(self, bpf):
                 if self.probe_type == "r":
+                        #含返回值的kprobe
                         bpf.attach_kretprobe(event=self.function,
                                              fn_name=self.probe_name)
                 elif self.probe_type == "p":
+                        #含参数的kprobe
                         bpf.attach_kprobe(event=self.function,
                                           fn_name=self.probe_name)
                 # Note that tracepoints don't need an explicit attach
@@ -679,10 +714,12 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
 """
 
         def __init__(self):
+                #定义程序的帮助信息
                 parser = argparse.ArgumentParser(description="Attach to " +
                   "functions and print trace messages.",
                   formatter_class=argparse.RawDescriptionHelpFormatter,
                   epilog=Tool.examples)
+                #定义buffer-pages参数
                 parser.add_argument("-b", "--buffer-pages", type=int,
                   default=Tool.DEFAULT_PERF_BUFFER_PAGES,
                   help="number of pages to use for perf_events ring buffer "
@@ -723,8 +760,10 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                   action="store_true", help="output user stack trace")
                 parser.add_argument("-a", "--address", action="store_true",
                   help="print virtual address in stacks")
+                #提供用户指定的probe串，容许指定多个
                 parser.add_argument(metavar="probe", dest="probes", nargs="+",
                   help="probe specifier (see examples)")
+                #显示include头文件路径
                 parser.add_argument("-I", "--include", action="append",
                   metavar="header",
                   help="additional header files to include in the BPF program "
@@ -733,13 +772,17 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                        "or relative to default kernel header search path")
                 parser.add_argument("--ebpf", action="store_true",
                   help=argparse.SUPPRESS)
+                #开始解析参数
                 self.args = parser.parse_args()
                 if self.args.tgid and self.args.pid:
+                        #如果同时给定了tgid,pid则报错
                         parser.error("only one of -p and -L may be specified")
 
         def _create_probes(self):
+                #执行参数配置
                 Probe.configure(self.args)
                 self.probes = []
+                #遍历参数设置的每个probe信息，构造Probe对象，加入到[]中
                 for probe_spec in self.args.probes:
                         self.probes.append(Probe(
                                 probe_spec, self.args.string_size,
@@ -751,10 +794,10 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
 #include <linux/sched.h>        /* For TASK_COMM_LEN */
 
 """
-                #生成要include的文件
+                #生成用户通过-i指定的要include的文件
                 for include in (self.args.include or []):
                         if include.startswith((".", "/")):
-                                #非系统包含
+                                #如果include以./开头，则非系统包含
                                 include = os.path.abspath(include)
                                 self.program += "#include \"%s\"\n" % include
                         else:
@@ -762,6 +805,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                                 self.program += "#include <%s>\n" % include
                 self.program += BPF.generate_auto_includes(
                         map(lambda p: p.raw_probe, self.probes))
+                #遍历用户指定的probes
                 for probe in self.probes:
                         self.program += probe.generate_program(
                                         self.args.include_self)
@@ -813,6 +857,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
 
         def run(self):
                 try:
+                        #先创建probes
                         self._create_probes()
                         self._generate_program()
                         self._attach_probes()

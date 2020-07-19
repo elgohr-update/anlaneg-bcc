@@ -1073,15 +1073,17 @@ error:
   return -1;
 }
 
-int bpf_attach_kprobe(int progfd, enum bpf_probe_attach_type attach_type,
+//将bpf附加到kprobe中去
+int bpf_attach_kprobe(int progfd/*bpf对应的程序fd*/, enum bpf_probe_attach_type attach_type/*附着点*/,
                       const char *ev_name, const char *fn_name,
-                      uint64_t fn_offset, int maxactive)
+                      uint64_t fn_offset/*附着函数地址offset*/, int maxactive)
 {
   return bpf_attach_probe(progfd, attach_type,
                           ev_name, fn_name, "kprobe",
                           fn_offset, -1, maxactive);
 }
 
+//将pbf附加到uprobe中去
 int bpf_attach_uprobe(int progfd, enum bpf_probe_attach_type attach_type,
                       const char *ev_name, const char *binary_path,
                       uint64_t offset, pid_t pid)

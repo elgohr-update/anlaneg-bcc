@@ -295,6 +295,7 @@ class BPF(object):
         #要编译的源文件
         src_file = _assert_is_bytes(src_file)
         hdr_file = _assert_is_bytes(hdr_file)
+        #要编译的字符串形式的c代码
         text = _assert_is_bytes(text)
 
         assert not (text and src_file)
@@ -323,6 +324,7 @@ class BPF(object):
         if src_file.endswith(b".b"):
             self.module = lib.bpf_module_create_b(src_file, hdr_file, self.debug, device)
         else:
+            #如果指定了源文件，则加载源文件中对应的c代码
             if src_file:
                 # Read the BPF C source file into the text variable. This ensures,
                 # that files and inline text are treated equally.
@@ -341,6 +343,7 @@ class BPF(object):
             text = usdt_text + text
 
 
+            #通过字符串类型的c代码创建module
             self.module = lib.bpf_module_create_c_from_string(text,
                                                               self.debug,
                                                               cflags_array, len(cflags_array),
@@ -371,6 +374,7 @@ class BPF(object):
 
     def load_func(self, func_name, prog_type, device = None):
         func_name = _assert_is_bytes(func_name)
+        #检查之前是否已有缓存
         if func_name in self.funcs:
             return self.funcs[func_name]
         if not lib.bpf_function_start(self.module, func_name):
@@ -380,10 +384,11 @@ class BPF(object):
             log_level = 2
         elif (self.debug & DEBUG_BPF):
             log_level = 1
+        #调用bpf系统调用，完成代码加载
         fd = lib.bcc_func_load(self.module, prog_type, func_name,
-                lib.bpf_function_start(self.module, func_name),
-                lib.bpf_function_size(self.module, func_name),
-                lib.bpf_module_license(self.module),
+                lib.bpf_function_start(self.module, func_name),#指令
+                lib.bpf_function_size(self.module, func_name),#指令长度
+                lib.bpf_module_license(self.module),#
                 lib.bpf_module_kern_version(self.module),
                 log_level, None, 0, device);
 
@@ -538,17 +543,21 @@ class BPF(object):
 
     @staticmethod
     def get_kprobe_functions(event_re):
+        #打开kprobe的黑名单，遍历每行 收集函数名称
         with open("%s/../kprobes/blacklist" % TRACEFS, "rb") as blacklist_f:
             blacklist = set([line.rstrip().split()[1] for line in blacklist_f])
         fns = []
 
         in_init_section = 0
         in_irq_section = 0
+        #打开kernel所有符号
         with open("/proc/kallsyms", "rb") as avail_file:
             for line in avail_file:
+                #收集 类型及符号名
                 (t, fn) = line.rstrip().split()[1:3]
                 # Skip all functions defined between __init_begin and
                 # __init_end
+                # __init_begin 与 __init_end之间的函数将被跳过
                 if in_init_section == 0:
                     if fn == b'__init_begin':
                         in_init_section = 1
@@ -571,6 +580,7 @@ class BPF(object):
                 # prefix _kbl_addr_*, blacklisting them by looking at the name
                 # allows to catch also those symbols that are defined in kernel
                 # modules.
+                # 跳过_kbl_addr_开头的函数
                 if fn.startswith(b'_kbl_addr_'):
                     continue
                 # Explicitly blacklist perf-related functions, they are all
@@ -583,8 +593,10 @@ class BPF(object):
                 if (t.lower() in [b't', b'w']) and re.match(event_re, fn) \
                     and fn not in blacklist:
                     fns.append(fn)
+        #返回可probe的函数
         return set(fns)     # Some functions may appear more than once
 
+    #检查probe是否超限
     def _check_probe_quota(self, num_new_probes):
         global _num_open_probes
         if _num_open_probes + num_new_probes > _probe_limit:
@@ -636,6 +648,8 @@ class BPF(object):
                 return self.get_syscall_fnname(name[len(prefix):])
         return name
        
+    #event 要probe的函数名
+    #fn_name probe逻辑实现函数名
     def attach_kprobe(self, event=b"", event_off=0, fn_name=b"", event_re=b""):
         event = _assert_is_bytes(event)
         fn_name = _assert_is_bytes(fn_name)
@@ -678,6 +692,7 @@ class BPF(object):
             return
 
         self._check_probe_quota(1)
+        #通过bpf系统调用，加载bpf程序
         fn = self.load_func(fn_name, BPF.KPROBE)
         ev_name = b"r_" + event.replace(b"+", b"_").replace(b".", b"_")
         fd = lib.bpf_attach_kprobe(fn.fd, 1, ev_name, event, 0, maxactive)

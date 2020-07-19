@@ -159,7 +159,7 @@ int BPFModule::free_bcc_memory() {
 }
 
 // load an entire c file as a module
-int BPFModule::load_cfile(const string &file, bool in_memory, const char *cflags[], int ncflags) {
+int BPFModule::load_cfile(const string &file, bool in_memory/*文件内容是否在内存*/, const char *cflags[], int ncflags) {
   ClangLoader clang_loader(&*ctx_, flags_);
   if (clang_loader.parse(&mod_, *ts_, file, in_memory, cflags, ncflags, id_,
                          *func_src_, mod_src_, maps_ns_, fake_fd_map_, perf_events_))
@@ -815,6 +815,8 @@ int BPFModule::load_c(const string &filename, const char *cflags[], int ncflags)
     fprintf(stderr, "Invalid filename\n");
     return -1;
   }
+
+  //加载c代码
   if (int rc = load_cfile(filename, false, cflags, ncflags))
     return rc;
   if (rw_engine_enabled_) {
@@ -860,7 +862,7 @@ int BPFModule::bcc_func_load(int prog_type, const char *name,
 
   attr.prog_type = (enum bpf_prog_type)prog_type;
   attr.name = name;
-  attr.insns = insns;
+  attr.insns = insns;/*指令*/
   attr.license = license;
   attr.kern_version = kern_version;
   attr.log_level = log_level;

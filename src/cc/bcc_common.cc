@@ -37,9 +37,12 @@ void * bpf_module_create_c(const char *filename, unsigned flags, const char *cfl
   return mod;
 }
 
-void * bpf_module_create_c_from_string(const char *text, unsigned flags, const char *cflags[],
+//通过c代码创建BPFModule
+void * bpf_module_create_c_from_string(const char *text/*c代码*/, unsigned flags, const char *cflags[],
                                        int ncflags, bool allow_rlimit, const char *dev_name) {
+  //创建BPFModule对象
   auto mod = new ebpf::BPFModule(flags, nullptr, true, "", allow_rlimit, dev_name);
+  //加载C代码
   if (mod->load_string(text, cflags, ncflags) != 0) {
     delete mod;
     return nullptr;
@@ -239,7 +242,7 @@ int bpf_table_leaf_sscanf(void *program, size_t id, const char *buf, void *leaf)
 }
 
 int bcc_func_load(void *program, int prog_type, const char *name,
-                  const struct bpf_insn *insns, int prog_len,
+                  const struct bpf_insn *insns/*指令*/, int prog_len,
                   const char *license, unsigned kern_version,
                   int log_level, char *log_buf, unsigned log_buf_size,
                   const char *dev_name) {

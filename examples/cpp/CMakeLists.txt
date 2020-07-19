@@ -1,9 +1,13 @@
 # Copyright (c) Facebook, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License")
 
+include_directories(${CMAKE_BINARY_DIR}/src/cc)
 include_directories(${CMAKE_SOURCE_DIR}/src/cc)
 include_directories(${CMAKE_SOURCE_DIR}/src/cc/api)
 include_directories(${CMAKE_SOURCE_DIR}/src/cc/libbpf/include/uapi)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
 
 option(INSTALL_CPP_EXAMPLES "Install C++ examples. Those binaries are statically linked and can take plenty of disk space" OFF)
 

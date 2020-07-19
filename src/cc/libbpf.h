@@ -45,6 +45,7 @@ int bpf_lookup_elem(int fd, void *key, void *value);
 int bpf_delete_elem(int fd, void *key);
 int bpf_get_first_key(int fd, void *key, size_t key_size);
 int bpf_get_next_key(int fd, void *key, void *next_key);
+int bpf_lookup_and_delete(int fd, void *key, void *value);
 
 /*
  * Load a BPF program, and return the FD of the loaded program.
@@ -60,7 +61,7 @@ int bpf_get_next_key(int fd, void *key, void *next_key);
  *     it will not to any additional memory allocation.
  *   - Otherwise, it will allocate an internal temporary buffer for log message
  *     printing, and continue to attempt increase that allocated buffer size if
- *     initial attemp was insufficient in size.
+ *     initial attempt was insufficient in size.
  */
 int bcc_prog_load(enum bpf_prog_type prog_type, const char *name,
                   const struct bpf_insn *insns, int prog_len,
@@ -93,7 +94,13 @@ int bpf_attach_tracepoint(int progfd, const char *tp_category,
                           const char *tp_name);
 int bpf_detach_tracepoint(const char *tp_category, const char *tp_name);
 
-int bpf_attach_raw_tracepoint(int progfd, char *tp_name);
+int bpf_attach_raw_tracepoint(int progfd, const char *tp_name);
+
+int bpf_attach_kfunc(int prog_fd);
+
+int bpf_attach_lsm(int prog_fd);
+
+bool bpf_has_kernel_btf(void);
 
 void * bpf_open_perf_buffer(perf_reader_raw_cb raw_cb,
                             perf_reader_lost_cb lost_cb, void *cb_cookie,
@@ -115,6 +122,17 @@ int bpf_attach_perf_event(int progfd, uint32_t ev_type, uint32_t ev_config,
 int bpf_open_perf_event(uint32_t type, uint64_t config, int pid, int cpu);
 
 int bpf_close_perf_event_fd(int fd);
+
+typedef int (*ring_buffer_sample_fn)(void *ctx, void *data, size_t size);
+
+struct ring_buffer;
+
+void * bpf_new_ringbuf(int map_fd, ring_buffer_sample_fn sample_cb, void *ctx);
+void bpf_free_ringbuf(struct ring_buffer *rb);
+int bpf_add_ringbuf(struct ring_buffer *rb, int map_fd,
+                    ring_buffer_sample_fn sample_cb, void *ctx);
+int bpf_poll_ringbuf(struct ring_buffer *rb, int timeout_ms);
+int bpf_consume_ringbuf(struct ring_buffer *rb);
 
 int bpf_obj_pin(int fd, const char *pathname);
 int bpf_obj_get(const char *pathname);

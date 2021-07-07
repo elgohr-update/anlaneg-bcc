@@ -33,11 +33,12 @@ static struct env {
 static volatile bool exiting;
 
 const char *argp_program_version = "cpudist 0.1";
-const char *argp_program_bug_address = "<ethercflow@gmail.com>";
+const char *argp_program_bug_address =
+	"https://github.com/iovisor/bcc/tree/master/libbpf-tools";
 const char argp_program_doc[] =
 "Summarize on-CPU time per task as a histogram.\n"
 "\n"
-"USAGE: cpudist [-h] [-O] [-T] [-m] [-P] [-L] [-p PID] [interval] [count]\n"
+"USAGE: cpudist [--help] [-O] [-T] [-m] [-P] [-L] [-p PID] [interval] [count]\n"
 "\n"
 "EXAMPLES:\n"
 "    cpudist              # summarize on-CPU time as a histogram"
@@ -48,7 +49,6 @@ const char argp_program_doc[] =
 "    cpudist -p 185       # trace PID 185 only";
 
 static const struct argp_option opts[] = {
-	{ NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help" },
 	{ "offcpu", 'O', NULL, 0, "Measure off-CPU time" },
 	{ "timestamp", 'T', NULL, 0, "Include timestamp on output" },
 	{ "milliseconds", 'm', NULL, 0, "Millisecond histogram" },
@@ -56,6 +56,7 @@ static const struct argp_option opts[] = {
 	{ "tids", 'L', NULL, 0, "Print a histogram per thread ID" },
 	{ "pid", 'p', "PID", 0, "Trace this PID only" },
 	{ "verbose", 'v', NULL, 0, "Verbose debug output" },
+	{ NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help" },
 	{},
 };
 
@@ -64,11 +65,11 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	static int pos_args;
 
 	switch (key) {
+	case 'h':
+		argp_state_help(state, stderr, ARGP_HELP_STD_HELP);
+		break;
 	case 'v':
 		env.verbose = true;
-		break;
-	case 'h':
-		argp_usage(state);
 		break;
 	case 'm':
 		env.milliseconds = true;
@@ -207,7 +208,7 @@ int main(int argc, char **argv)
 
 	obj = cpudist_bpf__open();
 	if (!obj) {
-		fprintf(stderr, "failed to open and/or load BPF ojbect\n");
+		fprintf(stderr, "failed to open BPF object\n");
 		return 1;
 	}
 

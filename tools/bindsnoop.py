@@ -43,7 +43,7 @@ from time import sleep
 examples = """examples:
     ./bindsnoop           # trace all TCP bind()s
     ./bindsnoop -t        # include timestamps
-    ./tcplife -w        # wider columns (fit IPv6)
+    ./bindsnoop -w        # wider columns (fit IPv6)
     ./bindsnoop -p 181    # only trace PID 181
     ./bindsnoop -P 80     # only trace port 80
     ./bindsnoop -P 80,81  # only trace port 80 and 81
@@ -344,7 +344,7 @@ if args.port:
     sports = [int(sport) for sport in args.port.split(',')]
     sports_if = ' && '.join(['sport != %d' % sport for sport in sports])
     bpf_text = bpf_text.replace('FILTER_PORT',
-        'if (%s) { currsock.delete(&pid); return 0; }' % sports_if)
+        'if (%s) { currsock.delete(&tid); return 0; }' % sports_if)
 if args.uid:
     bpf_text = bpf_text.replace('FILTER_UID',
         'if (uid != %s) { return 0; }' % args.uid)

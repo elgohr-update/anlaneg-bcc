@@ -27,7 +27,8 @@ static struct env {
 } env = { };
 
 const char *argp_program_version = "drsnoop 0.1";
-const char *argp_program_bug_address = "<ethercflow@gmail.com>";
+const char *argp_program_bug_address =
+	"https://github.com/iovisor/bcc/tree/master/libbpf-tools";
 const char argp_program_doc[] =
 "Trace direct reclaim latency.\n"
 "\n"
@@ -46,6 +47,7 @@ static const struct argp_option opts[] = {
 	{ "pid", 'p', "PID", 0, "Process PID to trace" },
 	{ "tid", 't', "TID", 0, "Thread TID to trace" },
 	{ "verbose", 'v', NULL, 0, "Verbose debug output" },
+	{ NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help" },
 	{},
 };
 
@@ -57,6 +59,9 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	int pid;
 
 	switch (key) {
+	case 'h':
+		argp_state_help(state, stderr, ARGP_HELP_STD_HELP);
+		break;
 	case 'v':
 		env.verbose = true;
 		break;
@@ -115,7 +120,7 @@ void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 	tm = localtime(&t);
 	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
 	printf("%-8s %-16s %-6d %8.3f %5lld",
-	       ts, e->task, e->pid, (double)e->delta_ns / 1000000,
+	       ts, e->task, e->pid, e->delta_ns / 1000000.0,
 	       e->nr_reclaimed);
 	if (env.extended)
 		printf(" %8llu", e->nr_free_pages * page_size / 1024);
@@ -156,7 +161,7 @@ int main(int argc, char **argv)
 
 	obj = drsnoop_bpf__open();
 	if (!obj) {
-		fprintf(stderr, "failed to open and/or load BPF object\n");
+		fprintf(stderr, "failed to open BPF object\n");
 		return 1;
 	}
 

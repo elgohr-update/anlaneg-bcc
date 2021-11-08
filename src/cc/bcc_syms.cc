@@ -661,6 +661,7 @@ int bcc_resolve_global_addr(int pid, const char *module, const uint64_t address,
 static int _sym_cb_wrapper(const char *symname, uint64_t addr, uint64_t,
                            void *payload) {
   SYM_CB cb = (SYM_CB) payload;
+  /*传入符号，符号地址*/
   return cb(symname, addr);
 }
 
@@ -703,8 +704,8 @@ int _find_load(uint64_t v_addr, uint64_t mem_sz, uint64_t file_offset,
   return 0;
 }
 
-int bcc_resolve_symname(const char *module, const char *symname,
-                        const uint64_t addr, int pid,
+int bcc_resolve_symname(const char *module, const char *symname/*符号名称*/,
+                        const uint64_t addr/*符号地址*/, int pid,
                         struct bcc_symbol_option *option,
                         struct bcc_symbol *sym) {
   int module_type;

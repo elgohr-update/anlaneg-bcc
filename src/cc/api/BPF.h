@@ -299,6 +299,7 @@ class BPF {
     return (c != '+') && (c != '.');
   }
 
+  /*检查字符是否合预期*/
   static bool uprobe_path_validator(char c) {
     return std::isalpha(c) || std::isdigit(c) || (c == '_');
   }

@@ -267,6 +267,7 @@ class BPF(object):
     _sym_caches = {}
     _bsymcache =  lib.bcc_buildsymcache_new()
 
+    #可依据关键字包含的头文件
     _auto_includes = {
         "linux/time.h": ["time"],
         "linux/fs.h": ["fs", "file"],
@@ -309,6 +310,7 @@ class BPF(object):
             raise OSError(errno, os.strerror(errno))
         return t.tv_sec * 1e9 + t.tv_nsec
 
+    #如果program_workds中包含了指定keywords,则添加对应的header files
     @classmethod
     def generate_auto_includes(cls, program_words):
         """
@@ -361,14 +363,17 @@ class BPF(object):
         """
         # Source: http://stackoverflow.com/a/377028
         def is_exe(fpath):
+            #是否为可执行程序
             return os.path.isfile(fpath) and \
                 os.access(fpath, os.X_OK)
 
         fpath, fname = os.path.split(bin_path)
         if fpath:
+            #本身即为路径，直接返回
             if is_exe(bin_path):
                 return bin_path
         else:
+            #在系统path中进行查找
             for path in os.environ["PATH"].split(os.pathsep):
                 path = path.strip('"')
                 exe_file = os.path.join(path.encode(), bin_path)
@@ -454,6 +459,7 @@ class BPF(object):
                                                               cflags_array, len(cflags_array),
                                                               allow_rlimit, device)
         if not self.module:
+            #编译代码失败
             raise Exception("Failed to compile BPF module %s" % (src_file or "<text>"))
 
         for usdt_context in usdt_contexts:
@@ -928,10 +934,12 @@ class BPF(object):
         return module_path, new_addr
 
     @staticmethod
-    def find_library(libname):
+    def find_library(libname):  
         libname = _assert_is_bytes(libname)
+        #检查libname对应的路径（非进程方式）
         res = lib.bcc_procutils_which_so(libname, 0)
         if not res:
+            #没有找到此lib
             return None
         libpath = ct.cast(res, ct.c_char_p).value
         lib.bcc_procutils_free(res)
@@ -1222,12 +1230,15 @@ class BPF(object):
         def sym_cb(sym_name, addr):
             dname = sym_name
             if re.match(sym_re, dname):
+                #收集与sym_re匹配的符号地址
                 addresses.append((dname, addr))
             return 0
 
+        #遍历name指定elf文件的符号
         res = lib.bcc_foreach_function_symbol(name, _SYM_CB_TYPE(sym_cb))
         if res < 0:
             raise Exception("Error %d enumerating symbols in %s" % (res, name))
+        #返回“符号名称”，”符号地址“的映射表
         return addresses
 
     def _get_uprobe_evname(self, prefix, path, addr, pid):
@@ -1269,16 +1280,23 @@ class BPF(object):
 
         assert sym_off >= 0
         if addr is not None:
+            #如果没有给定符号地址，则不容许符号偏移
             assert sym_off == 0, "offset with addr is not supported"
 
+        #取程序路径/lib的路径
         name = _assert_is_bytes(name)
+        #取要观察的函数名称
         sym = _assert_is_bytes(sym)
         sym_re = _assert_is_bytes(sym_re)
+        #probe点对应的名称
         fn_name = _assert_is_bytes(fn_name)
 
         if sym_re:
+            #给定了sym_re,则列出sym_re匹配的所有符号名称及符号地址
+            #并重新调用本函数，传入addr
             addresses = BPF.get_user_addresses(name, sym_re)
             self._check_probe_quota(len(addresses))
+            #遍历这些需要probe的函数及地址，执行attach
             for sym_addr in addresses:
                 self.attach_uprobe(name=name, addr=sym_addr,
                                    fn_name=fn_name, pid=pid)
@@ -1366,6 +1384,7 @@ class BPF(object):
         self.detach_uprobe_event(ev_name)
 
     def _trace_autoload(self):
+        #遍历生成的函数名称
         for i in range(0, lib.bpf_num_functions(self.module)):
             func_name = lib.bpf_function_name(self.module, i)
             if func_name.startswith(b"kprobe__"):

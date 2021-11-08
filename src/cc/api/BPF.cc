@@ -254,6 +254,7 @@ StatusTuple BPF::attach_kprobe(const std::string& kernel_func,
   return StatusTuple::OK();
 }
 
+/*使用uprobe*/
 StatusTuple BPF::attach_uprobe(const std::string& binary_path,
                                const std::string& symbol,
                                const std::string& probe_func,
@@ -857,9 +858,12 @@ std::string BPF::get_uprobe_event(const std::string& binary_path,
                                   uint64_t offset, bpf_probe_attach_type type,
                                   pid_t pid) {
   std::string res = attach_type_prefix(type) + "_";
+  /*将不合法的binary_path改变为'_'*/
   res += sanitize_str(binary_path, &BPF::uprobe_path_validator);
+  /*命并上offset*/
   res += "_0x" + uint_to_hex(offset);
   if (pid != -1)
+      /*合并上进程*/
     res += "_" + std::to_string(pid);
   return res;
 }

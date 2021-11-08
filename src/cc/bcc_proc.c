@@ -275,14 +275,14 @@ struct ld_cache1_entry {
 
 struct ld_cache1 {
   char header[CACHE1_HEADER_LEN];
-  uint32_t entry_count;
+  uint32_t entry_count;/*实体数*/
   struct ld_cache1_entry entries[0];
 };
 
 struct ld_cache2_entry {
   int32_t flags;
-  uint32_t key;
-  uint32_t value;
+  uint32_t key;/*到key的偏移量*/
+  uint32_t value;/*到value的偏移量*/
   uint32_t pad1_;
   uint64_t pad2_;
 };
@@ -301,10 +301,11 @@ static struct ld_lib {
   char *libname;
   char *path;
   int flags;
-} * lib_cache;
+} * lib_cache;/*记录系统的lib cache信息，来源于/etc/ld.so.cache*/
 
 static int read_cache1(const char *ld_map) {
   struct ld_cache1 *ldcache = (struct ld_cache1 *)ld_map;
+  /*偏移基准*/
   const char *ldstrings =
       (const char *)(ldcache->entries + ldcache->entry_count);
   uint32_t i;
@@ -313,6 +314,7 @@ static int read_cache1(const char *ld_map) {
       (struct ld_lib *)malloc(ldcache->entry_count * sizeof(struct ld_lib));
   lib_cache_count = (int)ldcache->entry_count;
 
+  /*读取libname,path*/
   for (i = 0; i < ldcache->entry_count; ++i) {
     const char *key = ldstrings + ldcache->entries[i].key;
     const char *val = ldstrings + ldcache->entries[i].value;
@@ -329,13 +331,16 @@ static int read_cache2(const char *ld_map) {
   struct ld_cache2 *ldcache = (struct ld_cache2 *)ld_map;
   uint32_t i;
 
+  /*cache2必须以CACHE2_HEADER 开头*/
   if (memcmp(ld_map, CACHE2_HEADER, CACHE2_HEADER_LEN))
     return -1;
 
   lib_cache =
       (struct ld_lib *)malloc(ldcache->entry_count * sizeof(struct ld_lib));
+  /*lib被cache的总数*/
   lib_cache_count = (int)ldcache->entry_count;
 
+  /*读取libname,path,flags*/
   for (i = 0; i < ldcache->entry_count; ++i) {
     const char *key = ld_map + ldcache->entries[i].key;
     const char *val = ld_map + ldcache->entries[i].value;
@@ -348,6 +353,7 @@ static int read_cache2(const char *ld_map) {
   return 0;
 }
 
+/*加载/etc/ld.so.cache文件*/
 static int load_ld_cache(const char *cache_path) {
   struct stat st;
   size_t ld_size;
@@ -357,11 +363,13 @@ static int load_ld_cache(const char *cache_path) {
   if (fd < 0)
     return -1;
 
+  /*文件长度检查*/
   if (fstat(fd, &st) < 0 || st.st_size < sizeof(struct ld_cache1)) {
     close(fd);
     return -1;
   }
 
+  /*将文件map到内存*/
   ld_size = st.st_size;
   ld_map = (const char *)mmap(NULL, ld_size, PROT_READ, MAP_PRIVATE, fd, 0);
   if (ld_map == MAP_FAILED) {
@@ -369,17 +377,24 @@ static int load_ld_cache(const char *cache_path) {
     return -1;
   }
 
+  /*ld_map为1.7.0版本时*/
   if (memcmp(ld_map, CACHE1_HEADER, CACHE1_HEADER_LEN) == 0) {
     const struct ld_cache1 *cache1 = (struct ld_cache1 *)ld_map;
+    /*cache1_len长度为 entry数量*其结构体大小 + ld_cache1结构体大小*/
     size_t cache1_len = sizeof(struct ld_cache1) +
                         (cache1->entry_count * sizeof(struct ld_cache1_entry));
+    /*cache1_len长度对齐*/
     cache1_len = (cache1_len + 0x7) & ~0x7ULL;
 
+    /*检查是否有cache2*/
     if (ld_size > (cache1_len + sizeof(struct ld_cache2)))
+        /*跳到ld_map,针对cache2进行读取*/
       ret = read_cache2(ld_map + cache1_len);
     else
+        /*读取cache1*/
       ret = read_cache1(ld_map);
   } else {
+    /*没有magic,按cache2格式读取*/
     ret = read_cache2(ld_map);
   }
 
@@ -410,12 +425,14 @@ static bool match_so_flags(int flags) {
   case ABI_S390_LIB64:
   case ABI_POWERPC_LIB64:
   case ABI_AARCH64_LIB64:
+      /*64系统的so必须当前也是64位才能匹配*/
     return (sizeof(void *) == 8);
   }
 
   return sizeof(void *) == 4;
 }
 
+/*给定进程pid,在进程id中查找libname,返回其对应的libpath*/
 static bool which_so_in_process(const char* libname, int pid, char* libpath) {
   int ret, found = false;
   char endline[4096], *mapname = NULL, *newline;
@@ -424,11 +441,13 @@ static bool which_so_in_process(const char* libname, int pid, char* libpath) {
   char search1[search_len + 1];
   char search2[search_len + 1];
 
+  /*打开/proc/$pid/maps文件*/
   snprintf(mappings_file, sizeof(mappings_file), "/proc/%ld/maps", (long)pid);
   FILE *fp = fopen(mappings_file, "r");
   if (!fp)
     return NULL;
 
+  /*尝试两种匹配格式*/
   snprintf(search1, search_len + 1, "/lib%s.", libname);
   snprintf(search2, search_len + 1, "/lib%s-", libname);
 
@@ -446,6 +465,7 @@ static bool which_so_in_process(const char* libname, int pid, char* libpath) {
 
     if (strstr(mapname, ".so") && (strstr(mapname, search1) ||
                                    strstr(mapname, search2))) {
+      /*匹配成功*/
       found = true;
       memcpy(libpath, mapname, strlen(mapname) + 1);
       break;
@@ -456,28 +476,34 @@ static bool which_so_in_process(const char* libname, int pid, char* libpath) {
   return found;
 }
 
+/*如果pid不为0，则检查进程下的lib,如果pid为0，则尝试在/etc/ld.so.cache中进行查询*/
 char *bcc_procutils_which_so(const char *libname, int pid) {
   const size_t soname_len = strlen(libname) + strlen("lib.so");
   char soname[soname_len + 1];
   char libpath[4096];
   int i;
 
+  /*libname中如果有'/',则直接返回*/
   if (strchr(libname, '/'))
     return strdup(libname);
 
+  /*如果给定了pid,则检查此进程对应的so,如果有libname,则返回其对应的路径*/
   if (pid && which_so_in_process(libname, pid, libpath))
     return strdup(libpath);
 
   if (lib_cache_count < 0)
     return NULL;
 
+  /*如果还未装载lib_cache,则读取/etc/ld.so.cache装载当前已知的lib*/
   if (!lib_cache_count && load_ld_cache(LD_SO_CACHE) < 0) {
     lib_cache_count = -1;
     return NULL;
   }
 
+  /*构造so名称*/
   snprintf(soname, soname_len + 1, "lib%s.so", libname);
 
+  /*在lib cache中查找*/
   for (i = 0; i < lib_cache_count; ++i) {
     if (!strncmp(lib_cache[i].libname, soname, soname_len) &&
         match_so_flags(lib_cache[i].flags)) {

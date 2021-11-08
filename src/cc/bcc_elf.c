@@ -36,6 +36,7 @@
 #define NT_STAPSDT 3
 #define ELF_ST_TYPE(x) (((uint32_t) x) & 0xf)
 
+/*读取elf头部*/
 static int openelf_fd(int fd, Elf **elf_out) {
   if (elf_version(EV_CURRENT) == EV_NONE)
     return -1;
@@ -47,7 +48,7 @@ static int openelf_fd(int fd, Elf **elf_out) {
   return 0;
 }
 
-static int openelf(const char *path, Elf **elf_out, int *fd_out) {
+static int openelf(const char *path, Elf **elf_out/*出参，elf文件头部*/, int *fd_out/*出参，path的文件描述符*/) {
   *fd_out = open(path, O_RDONLY);
   if (*fd_out < 0)
     return -1;
@@ -261,14 +262,17 @@ static int list_in_scn(Elf *e, Elf_Scn *section, size_t stridx, size_t symsize,
     if (data->d_size % symsize)
       return -1;
 
+    /*遍历每个符号*/
     for (i = 0; i < symcount; ++i) {
       GElf_Sym sym;
       const char *name;
       size_t name_len;
 
+      /*提取i号符号*/
       if (!gelf_getsym(data, (int)i, &sym))
         continue;
 
+      /*取符号名称*/
       if ((name = elf_strptr(e, stridx, sym.st_name)) == NULL)
         continue;
       if (name[0] == 0)
@@ -318,7 +322,7 @@ static int list_in_scn(Elf *e, Elf_Scn *section, size_t stridx, size_t symsize,
 
       int ret;
       if (option->lazy_symbolize)
-        ret = callback_lazy(stridx, sym.st_name, name_len, sym.st_value,
+        ret = callback_lazy(stridx, sym.st_name/*符号名称*/, name_len/*符号长度*/, sym.st_value,
                             sym.st_size, debugfile, payload);
       else
         ret = callback(name, sym.st_value, sym.st_size, payload);
@@ -330,17 +334,19 @@ static int list_in_scn(Elf *e, Elf_Scn *section, size_t stridx, size_t symsize,
   return 0;
 }
 
-static int listsymbols(Elf *e, bcc_elf_symcb callback,
+static int listsymbols(Elf *e, bcc_elf_symcb callback/*符号回调函数*/,
                        bcc_elf_symcb_lazy callback_lazy, void *payload,
                        struct bcc_symbol_option *option, bool debugfile) {
   Elf_Scn *section = NULL;
 
+  /*遍历每个section*/
   while ((section = elf_nextscn(e, section)) != 0) {
     GElf_Shdr header;
 
     if (!gelf_getshdr(section, &header))
       continue;
 
+    /*只处理symtab与dynsym段*/
     if (header.sh_type != SHT_SYMTAB && header.sh_type != SHT_DYNSYM)
       continue;
 

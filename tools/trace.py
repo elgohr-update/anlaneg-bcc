@@ -24,6 +24,7 @@ import os
 import traceback
 import sys
 
+#每个probe是一个Probe对象
 class Probe(object):
         probe_count = 0
         streq_index = 0
@@ -74,6 +75,7 @@ class Probe(object):
                 self._parse_probe()
                 #记录probe的编号
                 self.probe_num = Probe.probe_count
+                #记录probe名称，依据不同的probe type会有不同的名称，再加上probe编号，防重复
                 self.probe_name = "probe_%s_%d" % \
                                 (self._display_function(), self.probe_num)
                 self.probe_name = re.sub(r'[^A-Za-z0-9_]', '_',
@@ -113,13 +115,13 @@ class Probe(object):
                 #                                          opt. signature
                 #                               probespec       |      rest
                 #                               ---------  ----------   --
-                # ([^ \t\(]+) 以非空格,\t,\(开头的多个字每  ==》probe函数名及probe type
+                # ([^ \t\(]+) 以非空格,\t,\(开头的多个字每  ==》probe type及probe函数名
                 # (\([^\(]*\))?  一个或零个 \( 字符，零或多个非\(字符 ，一个或零个\)字符 ==> 函数签名
                 # （.*) 任意字符 ==> filter ? + 
                 (spec, sig, rest) = re.match(r'([^ \t\(]+)(\([^\(]*\))?(.*)',
                                              text).groups()
                 
-                #确定trace哪部分函数 p,u,t,r及库名称，函数名称
+                #解析probe type（p,u,t,r），库名称及probe函数名称
                 self._parse_spec(spec)
                 
                 # Remove the parens
@@ -158,6 +160,7 @@ class Probe(object):
                 # 将剩余信息做为action进行解析
                 self._parse_action(text.lstrip())
 
+        #含用offset的probe函数名称，例如ip_rcv+0x20
         def _parse_offset(self, func_and_offset):
                 func, offset_str = func_and_offset.split("+")
                 try:
@@ -179,11 +182,13 @@ class Probe(object):
                 # value between delimiters, e.g. 'r::func' for a kretprobe on
                 # the function func.
                 if len(parts) == 1:
+                        #没有包含':'，则probe_type='p'
                         parts = ["p", "", parts[0]]
                 elif len(parts) == 2:
+                        #只包含了一个':',则probe_type='p'
                         parts = ["p", parts[0], parts[1]]
                 if len(parts[0]) == 0:
-                        #无::时，默认采用p格式
+                        #包含了多个':',且parts[0]为空(即以':'开头），则probe_type='p'
                         self.probe_type = "p"
                 elif parts[0] in ["p", "r", "t", "u"]:
                         #当前仅容许四个格式
@@ -193,6 +198,7 @@ class Probe(object):
                                    "or 'u', but got '%s'" % parts[0])
                 self.offset = 0
                 if "+" in parts[-1]:
+                        #probe的函数名含有偏移量，例如‘ip_rcv+0x20'
                         parts[-1], self.offset = self._parse_offset(parts[-1])
 
                 if self.probe_type == "t":
@@ -209,10 +215,12 @@ class Probe(object):
                         # the USDT name in the specified library
                         self._find_usdt_probe()
                 else:
+                        #’p','r'情况下，function为probe的函数名称
                         self.library = ':'.join(parts[1:-1])
                         self.function = parts[-1]
 
                 # only x64 syscalls needs checking, no other syscall wrapper yet.
+                #检查是否为x64的系统调用
                 self.is_syscall_kprobe = False
                 if self.probe_type == "p" and len(self.library) == 0 and \
                    self.function[:10] == "__x64_sys_":
@@ -387,6 +395,7 @@ class Probe(object):
                   "U": "unsigned long long"}
         fmt_types = c_type.keys()
 
+        #生成格式化串对应的结构体成员
         def _generate_field_decl(self, idx):
                 field_type = self.types[idx]
                 if field_type == "s":
@@ -400,6 +409,7 @@ class Probe(object):
                 # according to the format string, and the Python program will
                 # construct the final display string.
                 self.events_name = "%s_events" % self.probe_name
+                #probe结构体名称
                 self.struct_name = "%s_data_t" % self.probe_name
                 self.stacks_name = "%s_stacks" % self.probe_name
                 stack_type = "BPF_STACK_TRACE" if self.build_id_enabled is False \
@@ -407,13 +417,18 @@ class Probe(object):
                 stack_table = "%s(%s, 1024);" % (stack_type, self.stacks_name) \
                               if (self.kernel_stack or self.user_stack) else ""
                 data_fields = ""
+                #按照format string中要求输出的类型，定义结构体成员
                 for i, field_type in enumerate(self.types):
                         data_fields += "        " + \
                                        self._generate_field_decl(i)
+                #如果有-t参数，需要输出time,则添加time变量
                 time_str = "u64 timestamp_ns;" if self.time_field else ""
+                #如果有-C参数，需要输出cpu,则添加cpu变量
                 cpu_str = "int cpu;" if self.print_cpu else ""
+                #如果有-K参数，则添加栈变量
                 kernel_stack_str = "       int kernel_stack_id;" \
                                    if self.kernel_stack else ""
+                #如果有-U参数，则添加栈变量
                 user_stack_str = "       int user_stack_id;" \
                                  if self.user_stack else ""
 
@@ -492,8 +507,11 @@ BPF_PERF_OUTPUT(%s);
                             arg, "{}_filter".format(arg))
             return text
 
+        #单个probe生成c代码
         def generate_program(self, include_self):
+                #生成data结构体字符串
                 data_decl = self._generate_data_decl()
+                #生成pid_filter代码
                 if Probe.pid != -1:
                         pid_filter = """
         if (__pid != %d) { return 0; }
@@ -512,6 +530,7 @@ BPF_PERF_OUTPUT(%s);
                 else:
                         pid_filter = ""
 
+                #？？？
                 if self.cgroup_map_name is not None:
                         cgroup_filter = """
         if (%s.check_current_task(0) <= 0) { return 0; }
@@ -537,10 +556,13 @@ BPF_PERF_OUTPUT(%s);
                         heading = "int %s(%s)" % (self.probe_name, signature)
                         ctx_name = "ctx"
 
+                #取时间代码段
                 time_str = """
         __data.timestamp_ns = bpf_ktime_get_ns();""" if self.time_field else ""
+                #取cpu代码段
                 cpu_str = """
         __data.cpu = bpf_get_smp_processor_id();""" if self.print_cpu else ""
+                #取栈代码段
                 stack_trace = ""
                 if self.user_stack:
                         stack_trace += """
@@ -553,6 +575,7 @@ BPF_PERF_OUTPUT(%s);
           %s, 0
         );""" % (self.stacks_name, ctx_name)
 
+                #生成probe处理函数
                 text = heading + """
 {
         u64 __pid_tgid = bpf_get_current_pid_tgid();
@@ -688,21 +711,26 @@ BPF_PERF_OUTPUT(%s);
                 # Note that tracepoints don't need an explicit attach
 
         def _attach_u(self, bpf):
+                #取self.library对应的完整目录（so)
                 libpath = BPF.find_library(self.library)
                 if libpath is None:
                         # This might be an executable (e.g. 'bash')
+                        # 如果没有此lib,则尝试是否为可执行文件
                         libpath = BPF.find_exe(self.library)
                 if libpath is None or len(libpath) == 0:
+                        #找不到这个程序及lib
                         self._bail("unable to find library %s" % self.library)
 
                 if self.probe_type == "u":
                         pass    # Was already enabled by the BPF constructor
                 elif self.probe_type == "r":
+                        #执行uretprobe附着
                         bpf.attach_uretprobe(name=libpath,
                                              sym=self.function,
                                              fn_name=self.probe_name,
                                              pid=Probe.tgid)
                 else:
+                        #执行uprobe附着
                         bpf.attach_uprobe(name=libpath,
                                           sym=self.function,
                                           fn_name=self.probe_name,
@@ -854,6 +882,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                                 self.args.kernel_stack, self.args.user_stack,
                                 self.cgroup_map_name, self.args.name, self.args.msg_filter))
 
+        #生成c代码
         def _generate_program(self):
                 self.program = """
 #include <linux/ptrace.h>
@@ -869,12 +898,16 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                         else:
                                 #系统包含
                                 self.program += "#include <%s>\n" % include
+                
+                #依据probe中字符，自动识别要添加的头文件，例如skb_buff时添加linux/netdevice.h
                 self.program += BPF.generate_auto_includes(
                         map(lambda p: p.raw_probe, self.probes))
+                #???
                 if self.cgroup_map_name is not None:
                         self.program += "BPF_CGROUP_ARRAY(%s, 1);\n" % \
                                         self.cgroup_map_name
-                #遍历用户指定的probes
+                
+                #遍历用户指定的probes,针对probe生成代码
                 for probe in self.probes:
                         self.program += probe.generate_program(
                                         self.args.include_self)
@@ -935,6 +968,7 @@ trace -I 'linux/fs_struct.h' 'mntns_install "users = %d", $task->fs->users'
                 try:
                         #先创建probes
                         self._create_probes()
+                        #为probes生成c代码
                         self._generate_program()
                         self._attach_probes()
                         self._main_loop()

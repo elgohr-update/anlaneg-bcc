@@ -167,6 +167,7 @@ class BPFModule {
   sec_map_def sections_;
   std::vector<TableDesc *> tables_;
   std::map<std::string, size_t> table_names_;
+  /*记录函数名称*/
   std::vector<std::string> function_names_;
   std::map<llvm::Type *, std::string> readers_;
   std::map<llvm::Type *, std::string> writers_;

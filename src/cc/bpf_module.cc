@@ -533,10 +533,12 @@ int BPFModule::finalize() {
   return 0;
 }
 
+/*返回模块中function名称数*/
 size_t BPFModule::num_functions() const {
   return function_names_.size();
 }
 
+/*取id指定的function名称*/
 const char * BPFModule::function_name(size_t id) const {
   if (id >= function_names_.size())
     return nullptr;
@@ -896,12 +898,12 @@ int BPFModule::load_c(const string &filename, const char *cflags[], int ncflags)
 }
 
 // load a C text string
-int BPFModule::load_string(const string &text, const char *cflags[], int ncflags) {
+int BPFModule::load_string(const string &text/*c代码字符串*/, const char *cflags[], int ncflags) {
   if (!sections_.empty()) {
     fprintf(stderr, "Program already initialized\n");
     return -1;
   }
-  if (int rc = load_cfile(text, true, cflags, ncflags))
+  if (int rc = load_cfile(text, true/*代码在内存中*/, cflags, ncflags))
     return rc;
   if (rw_engine_enabled_) {
     if (int rc = annotate())

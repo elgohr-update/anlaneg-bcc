@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # USAGE: test_map_in_map.py
 #
@@ -7,8 +7,8 @@
 
 from __future__ import print_function
 from bcc import BPF
-import distutils.version
 from unittest import main, skipUnless, TestCase
+from utils import kernel_version_ge
 import ctypes as ct
 import os
 
@@ -19,21 +19,10 @@ class CustomKey(ct.Structure):
     ("value_2", ct.c_int)
   ]
 
-def kernel_version_ge(major, minor):
-    # True if running kernel is >= X.Y
-    version = distutils.version.LooseVersion(os.uname()[2]).version
-    if version[0] > major:
-        return True
-    if version[0] < major:
-        return False
-    if minor and version[1] < minor:
-        return False
-    return True
-
 @skipUnless(kernel_version_ge(4,11), "requires kernel >= 4.11")
 class TestUDST(TestCase):
     def test_hash_table(self):
-        bpf_text = """
+        bpf_text = b"""
       BPF_ARRAY(cntl, int, 1);
       BPF_TABLE("hash", int, int, ex1, 1024);
       BPF_TABLE("hash", int, int, ex2, 1024);
@@ -65,16 +54,16 @@ class TestUDST(TestCase):
       }
 """
         b = BPF(text=bpf_text)
-        cntl_map = b.get_table("cntl")
-        ex1_map = b.get_table("ex1")
-        ex2_map = b.get_table("ex2")
-        hash_maps = b.get_table("maps_hash")
+        cntl_map = b.get_table(b"cntl")
+        ex1_map = b.get_table(b"ex1")
+        ex2_map = b.get_table(b"ex2")
+        hash_maps = b.get_table(b"maps_hash")
 
         hash_maps[ct.c_int(1)] = ct.c_int(ex1_map.get_fd())
         hash_maps[ct.c_int(2)] = ct.c_int(ex2_map.get_fd())
 
-        syscall_fnname = b.get_syscall_fnname("getuid")
-        b.attach_kprobe(event=syscall_fnname, fn_name="syscall__getuid")
+        syscall_fnname = b.get_syscall_fnname(b"getuid")
+        b.attach_kprobe(event=syscall_fnname, fn_name=b"syscall__getuid")
 
         try:
           ex1_map[ct.c_int(0)]
@@ -101,7 +90,7 @@ class TestUDST(TestCase):
         del hash_maps[ct.c_int(2)]
 
     def test_hash_table_custom_key(self):
-        bpf_text = """
+        bpf_text = b"""
         struct custom_key {
           int value_1;
           int value_2;
@@ -139,15 +128,15 @@ class TestUDST(TestCase):
         }
 """
         b = BPF(text=bpf_text)
-        cntl_map = b.get_table("cntl")
-        ex1_map = b.get_table("ex1")
-        ex2_map = b.get_table("ex2")
-        hash_maps = b.get_table("maps_hash")
+        cntl_map = b.get_table(b"cntl")
+        ex1_map = b.get_table(b"ex1")
+        ex2_map = b.get_table(b"ex2")
+        hash_maps = b.get_table(b"maps_hash")
 
         hash_maps[CustomKey(1, 1)] = ct.c_int(ex1_map.get_fd())
         hash_maps[CustomKey(1, 2)] = ct.c_int(ex2_map.get_fd())
-        syscall_fnname = b.get_syscall_fnname("getuid")
-        b.attach_kprobe(event=syscall_fnname, fn_name="syscall__getuid")
+        syscall_fnname = b.get_syscall_fnname(b"getuid")
+        b.attach_kprobe(event=syscall_fnname, fn_name=b"syscall__getuid")
 
         try:
           ex1_map[ct.c_int(0)]
@@ -174,7 +163,7 @@ class TestUDST(TestCase):
         del hash_maps[CustomKey(1, 2)]
 
     def test_array_table(self):
-        bpf_text = """
+        bpf_text = b"""
       BPF_ARRAY(cntl, int, 1);
       BPF_ARRAY(ex1, int, 1024);
       BPF_ARRAY(ex2, int, 1024);
@@ -203,16 +192,16 @@ class TestUDST(TestCase):
       }
 """
         b = BPF(text=bpf_text)
-        cntl_map = b.get_table("cntl")
-        ex1_map = b.get_table("ex1")
-        ex2_map = b.get_table("ex2")
-        array_maps = b.get_table("maps_array")
+        cntl_map = b.get_table(b"cntl")
+        ex1_map = b.get_table(b"ex1")
+        ex2_map = b.get_table(b"ex2")
+        array_maps = b.get_table(b"maps_array")
 
         array_maps[ct.c_int(1)] = ct.c_int(ex1_map.get_fd())
         array_maps[ct.c_int(2)] = ct.c_int(ex2_map.get_fd())
 
-        syscall_fnname = b.get_syscall_fnname("getuid")
-        b.attach_kprobe(event=syscall_fnname, fn_name="syscall__getuid")
+        syscall_fnname = b.get_syscall_fnname(b"getuid")
+        b.attach_kprobe(event=syscall_fnname, fn_name=b"syscall__getuid")
 
         cntl_map[0] = ct.c_int(1)
         os.getuid()

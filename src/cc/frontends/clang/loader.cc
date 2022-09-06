@@ -66,6 +66,44 @@ using std::vector;
 
 namespace ebpf {
 
+optional<FuncInfo &> ProgFuncInfo::get_func(std::string name) {
+  auto it = funcs_.find(name);
+  if (it != funcs_.end())
+    return it->second;
+  return nullopt;
+}
+
+optional<FuncInfo &> ProgFuncInfo::get_func(size_t id) {
+  auto it = func_idx_.find(id);
+  if (it != func_idx_.end())
+    return get_func(it->second);
+  return nullopt;
+}
+
+optional<std::string &> ProgFuncInfo::func_name(size_t id) {
+  auto it = func_idx_.find(id);
+  if (it != func_idx_.end())
+    return it->second;
+  return nullopt;
+}
+
+void ProgFuncInfo::for_each_func(
+    std::function<void(std::string, FuncInfo &)> cb) {
+  for (auto it = funcs_.begin(); it != funcs_.end(); ++it) {
+    cb(it->first, it->second);
+  }
+}
+
+optional<FuncInfo &> ProgFuncInfo::add_func(std::string name) {
+  auto fn = get_func(name);
+  if (fn)
+    return nullopt;
+  size_t current = funcs_.size();
+  funcs_.emplace(name, 0);
+  func_idx_.emplace(current, name);
+  return get_func(name);
+}
+
 ClangLoader::ClangLoader(llvm::LLVMContext *ctx, unsigned flags)
     : ctx_(ctx), flags_(flags)
 {
@@ -76,6 +114,31 @@ ClangLoader::ClangLoader(llvm::LLVMContext *ctx, unsigned flags)
 }
 
 ClangLoader::~ClangLoader() {}
+
+void ClangLoader::add_remapped_includes(clang::CompilerInvocation& invocation)
+{
+  // This option instructs clang whether or not to free the file buffers that we
+  // give to it. Since the embedded header files should be copied fewer times
+  // and reused if possible, set this flag to true.
+  invocation.getPreprocessorOpts().RetainRemappedFileBuffers = true;
+  for (const auto &f : remapped_headers_)
+    invocation.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
+  for (const auto &f : remapped_footers_)
+    invocation.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
+}
+
+void ClangLoader::add_main_input(clang::CompilerInvocation& invocation,
+                                 const std::string& main_path,
+                                 llvm::MemoryBuffer *main_buf)
+{
+  invocation.getPreprocessorOpts().addRemappedFile(main_path, main_buf);
+  invocation.getFrontendOpts().Inputs.clear();
+  invocation.getFrontendOpts().Inputs.push_back(
+      clang::FrontendInputFile(
+        main_path,
+        clang::FrontendOptions::getInputKindForExtension("c"))
+  );
+}
 
 namespace
 {
@@ -88,6 +151,16 @@ bool is_dir(const string& path)
     return false;
 
   return S_ISDIR(buf.st_mode);
+}
+
+bool is_file(const string& path)
+{
+  struct stat buf;
+
+  if (::stat (path.c_str (), &buf) < 0)
+    return false;
+
+  return S_ISREG(buf.st_mode);
 }
 
 std::pair<bool, string> get_kernel_path_info(const string kdir)
@@ -117,13 +190,12 @@ static int CreateFromArgs(clang::CompilerInvocation &invocation,
 
 }
 
-int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
-                       const string &file/*待解析的c代码*/, bool in_memory/*文件内容是否在内存*/, const char *cflags[],
-                       int ncflags, const std::string &id, FuncSource &func_src,
-                       std::string &mod_src,
-                       const std::string &maps_ns,
-                       fake_fd_map_def &fake_fd_map,
-                       std::map<std::string, std::vector<std::string>> &perf_events) {
+int ClangLoader::parse(
+    unique_ptr<llvm::Module> *mod, TableStorage &ts, const string &file/*待解析的c代码*/,
+    bool in_memory/*文件内容是否在内存*/, const char *cflags[], int ncflags, const std::string &id,
+    ProgFuncInfo &prog_func_info, std::string &mod_src,
+    const std::string &maps_ns, fake_fd_map_def &fake_fd_map,
+    std::map<std::string, std::vector<std::string>> &perf_events) {
   string main_path = "/virtual/main.c";
   unique_ptr<llvm::MemoryBuffer> main_buf;
   struct utsname un;
@@ -145,7 +217,10 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   }
 
   // If all attempts to obtain kheaders fail, check for kheaders.tar.xz in sysfs
-  if (!is_dir(kpath)) {
+  // Checking just for kpath existence is unsufficient, since it can refer to
+  // leftover build directory without headers present anymore.
+  // See https://github.com/iovisor/bcc/pull/3588 for more details.
+  if (!is_file(kpath + "/include/linux/kconfig.h")) {
     int ret = get_proc_kheaders(tmpdir);
     if (!ret) {
       kpath = tmpdir;
@@ -213,6 +288,7 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
     return -1;
 #if LLVM_MAJOR_VERSION >= 9
   flags_cstr.push_back("-g");
+  flags_cstr.push_back("-gdwarf-4");
 #else
   if (flags_ & DEBUG_SOURCE)
     flags_cstr.push_back("-g");
@@ -244,7 +320,8 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
 #endif
 
   if (do_compile(mod, ts, in_memory, flags_cstr, flags_cstr_rem, main_path,
-                 main_buf, id, func_src, mod_src, true, maps_ns, fake_fd_map, perf_events)) {
+                 main_buf, id, prog_func_info, mod_src, true, maps_ns,
+                 fake_fd_map, perf_events)) {
 #if BCC_BACKUP_COMPILE != 1
     return -1;
 #else
@@ -252,11 +329,12 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
     llvm::errs() << "WARNING: compilation failure, trying with system bpf.h\n";
 
     ts.DeletePrefix(Path({id}));
-    func_src.clear();
+    prog_func_info.clear();
     mod_src.clear();
     fake_fd_map.clear();
     if (do_compile(mod, ts, in_memory, flags_cstr, flags_cstr_rem, main_path,
-                   main_buf, id, func_src, mod_src, false, maps_ns, fake_fd_map, perf_events))
+                   main_buf, id, prog_func_info, mod_src, false, maps_ns,
+                   fake_fd_map, perf_events))
       return -1;
 #endif
   }
@@ -284,6 +362,12 @@ void *get_clang_target_cb(bcc_arch_t arch, bool for_syscall)
     case BCC_ARCH_MIPS:
       ret = "mips64el-unknown-linux-gnuabi64";
       break;
+    case BCC_ARCH_RISCV64:
+      ret = "riscv64-unknown-linux-gnu";
+      break;
+    case BCC_ARCH_LOONGARCH:
+      ret = "loongarch64-unknown-linux-gnu";
+      break;
     default:
       ret = "x86_64-unknown-linux-gnu";
   }
@@ -298,17 +382,14 @@ string get_clang_target(void) {
   return string(ret);
 }
 
-int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
-                            bool in_memory,
-                            const vector<const char *> &flags_cstr_in,
-                            const vector<const char *> &flags_cstr_rem,
-                            const std::string &main_path,
-                            const unique_ptr<llvm::MemoryBuffer> &main_buf,
-                            const std::string &id, FuncSource &func_src,
-                            std::string &mod_src, bool use_internal_bpfh,
-                            const std::string &maps_ns,
-                            fake_fd_map_def &fake_fd_map,
-                            std::map<std::string, std::vector<std::string>> &perf_events) {
+int ClangLoader::do_compile(
+    unique_ptr<llvm::Module> *mod, TableStorage &ts, bool in_memory,
+    const vector<const char *> &flags_cstr_in,
+    const vector<const char *> &flags_cstr_rem, const std::string &main_path,
+    const unique_ptr<llvm::MemoryBuffer> &main_buf, const std::string &id,
+    ProgFuncInfo &prog_func_info, std::string &mod_src, bool use_internal_bpfh,
+    const std::string &maps_ns, fake_fd_map_def &fake_fd_map,
+    std::map<std::string, std::vector<std::string>> &perf_events) {
   using namespace clang;
 
   vector<const char *> flags_cstr = flags_cstr_in;
@@ -377,17 +458,10 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   if (!CreateFromArgs(invocation0, ccargs, diags))
     return -1;
 
-  invocation0.getPreprocessorOpts().RetainRemappedFileBuffers = true;
-  for (const auto &f : remapped_headers_)
-    invocation0.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
-  for (const auto &f : remapped_footers_)
-    invocation0.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
+  add_remapped_includes(invocation0);
 
   if (in_memory) {
-    invocation0.getPreprocessorOpts().addRemappedFile(main_path, &*main_buf);
-    invocation0.getFrontendOpts().Inputs.clear();
-    invocation0.getFrontendOpts().Inputs.push_back(FrontendInputFile(
-        main_path, FrontendOptions::getInputKindForExtension("c")));
+    add_main_input(invocation0, main_path, &*main_buf);
   }
   invocation0.getFrontendOpts().DisableFree = false;
 
@@ -406,18 +480,8 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   if (!CreateFromArgs( invocation1, ccargs, diags))
     return -1;
 
-  // This option instructs clang whether or not to free the file buffers that we
-  // give to it. Since the embedded header files should be copied fewer times
-  // and reused if possible, set this flag to true.
-  invocation1.getPreprocessorOpts().RetainRemappedFileBuffers = true;
-  for (const auto &f : remapped_headers_)
-    invocation1.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
-  for (const auto &f : remapped_footers_)
-    invocation1.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
-  invocation1.getPreprocessorOpts().addRemappedFile(main_path, &*out_buf);
-  invocation1.getFrontendOpts().Inputs.clear();
-  invocation1.getFrontendOpts().Inputs.push_back(FrontendInputFile(
-      main_path, FrontendOptions::getInputKindForExtension("c")));
+  add_remapped_includes(invocation1);
+  add_main_input(invocation1, main_path, &*out_buf);
   invocation1.getFrontendOpts().DisableFree = false;
 
   compiler1.createDiagnostics();
@@ -425,7 +489,7 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   // capture the rewritten c file
   string out_str1;
   llvm::raw_string_ostream os1(out_str1);
-  BFrontendAction bact(os1, flags_, ts, id, main_path, func_src, mod_src,
+  BFrontendAction bact(os1, flags_, ts, id, main_path, prog_func_info, mod_src,
                        maps_ns, fake_fd_map, perf_events);
   if (!compiler1.ExecuteAction(bact))
     return -1;
@@ -437,15 +501,8 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   if (!CreateFromArgs(invocation2, ccargs, diags))
     return -1;
 
-  invocation2.getPreprocessorOpts().RetainRemappedFileBuffers = true;
-  for (const auto &f : remapped_headers_)
-    invocation2.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
-  for (const auto &f : remapped_footers_)
-    invocation2.getPreprocessorOpts().addRemappedFile(f.first, &*f.second);
-  invocation2.getPreprocessorOpts().addRemappedFile(main_path, &*out_buf1);
-  invocation2.getFrontendOpts().Inputs.clear();
-  invocation2.getFrontendOpts().Inputs.push_back(FrontendInputFile(
-      main_path, FrontendOptions::getInputKindForExtension("c")));
+  add_remapped_includes(invocation2);
+  add_main_input(invocation2, main_path, &*out_buf1);
   invocation2.getFrontendOpts().DisableFree = false;
   invocation2.getCodeGenOpts().DisableFree = false;
   // Resort to normal inlining. In -O0 the default is OnlyAlwaysInlining and
@@ -462,27 +519,4 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
 
   return 0;
 }
-
-const char * FuncSource::src(const std::string& name) {
-  auto src = funcs_.find(name);
-  if (src == funcs_.end())
-    return "";
-  return src->second.src_.data();
-}
-
-const char * FuncSource::src_rewritten(const std::string& name) {
-  auto src = funcs_.find(name);
-  if (src == funcs_.end())
-    return "";
-  return src->second.src_rewritten_.data();
-}
-
-void FuncSource::set_src(const std::string& name, const std::string& src) {
-  funcs_[name].src_ = src;
-}
-
-void FuncSource::set_src_rewritten(const std::string& name, const std::string& src) {
-  funcs_[name].src_rewritten_ = src;
-}
-
 }  // namespace ebpf

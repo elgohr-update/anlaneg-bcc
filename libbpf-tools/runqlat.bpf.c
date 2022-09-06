@@ -7,15 +7,24 @@
 #include "runqlat.h"
 #include "bits.bpf.h"
 #include "maps.bpf.h"
+#include "core_fixes.bpf.h"
 
 #define MAX_ENTRIES	10240
 #define TASK_RUNNING 	0
 
+const volatile bool filter_cg = false;
 const volatile bool targ_per_process = false;
 const volatile bool targ_per_thread = false;
 const volatile bool targ_per_pidns = false;
 const volatile bool targ_ms = false;
 const volatile pid_t targ_tgid = 0;
+
+struct {
+	__uint(type, BPF_MAP_TYPE_CGROUP_ARRAY);
+	__type(key, u32);
+	__type(value, u32);
+	__uint(max_entries, 1);
+} cgroup_map SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -48,15 +57,39 @@ int trace_enqueue(u32 tgid, u32 pid)
 	return 0;
 }
 
+static __always_inline unsigned int pid_namespace(struct task_struct *task)
+{
+	struct pid *pid;
+	unsigned int level;
+	struct upid upid;
+	unsigned int inum;
+
+	/*  get the pid namespace by following task_active_pid_ns(),
+	 *  pid->numbers[pid->level].ns
+	 */
+	pid = BPF_CORE_READ(task, thread_pid);
+	level = BPF_CORE_READ(pid, level);
+	bpf_core_read(&upid, sizeof(upid), &pid->numbers[level]);
+	inum = BPF_CORE_READ(upid.ns, ns.inum);
+
+	return inum;
+}
+
 SEC("tp_btf/sched_wakeup")
 int BPF_PROG(sched_wakeup, struct task_struct *p)
 {
+	if (filter_cg && !bpf_current_task_under_cgroup(&cgroup_map, 0))
+		return 0;
+
 	return trace_enqueue(p->tgid, p->pid);
 }
 
 SEC("tp_btf/sched_wakeup_new")
 int BPF_PROG(sched_wakeup_new, struct task_struct *p)
 {
+	if (filter_cg && !bpf_current_task_under_cgroup(&cgroup_map, 0))
+		return 0;
+
 	return trace_enqueue(p->tgid, p->pid);
 }
 
@@ -69,7 +102,10 @@ int BPF_PROG(sched_swith, bool preempt, struct task_struct *prev,
 	u32 pid, hkey;
 	s64 delta;
 
-	if (prev->state == TASK_RUNNING)
+	if (filter_cg && !bpf_current_task_under_cgroup(&cgroup_map, 0))
+		return 0;
+
+	if (get_task_state(prev) == TASK_RUNNING)
 		trace_enqueue(prev->tgid, prev->pid);
 
 	pid = next->pid;
@@ -86,7 +122,7 @@ int BPF_PROG(sched_swith, bool preempt, struct task_struct *prev,
 	else if (targ_per_thread)
 		hkey = pid;
 	else if (targ_per_pidns)
-		hkey = next->nsproxy->pid_ns_for_children->ns.inum;
+		hkey = pid_namespace(next);
 	else
 		hkey = -1;
 	histp = bpf_map_lookup_or_try_init(&hists, &hkey, &zero);

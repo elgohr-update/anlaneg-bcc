@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # offcputime    Summarize off-CPU time by stack trace
 #               For Linux, uses BCC, eBPF.
@@ -205,14 +205,18 @@ else:
     thread_context = "all threads"
     thread_filter = '1'
 if args.state == 0:
-    state_filter = 'prev->state == 0'
+    state_filter = 'prev->STATE_FIELD == 0'
 elif args.state:
     # these states are sometimes bitmask checked
-    state_filter = 'prev->state & %d' % args.state
+    state_filter = 'prev->STATE_FIELD & %d' % args.state
 else:
     state_filter = '1'
 bpf_text = bpf_text.replace('THREAD_FILTER', thread_filter)
 bpf_text = bpf_text.replace('STATE_FILTER', state_filter)
+if BPF.kernel_struct_has_field(b'task_struct', b'__state') == 1:
+    bpf_text = bpf_text.replace('STATE_FIELD', '__state')
+else:
+    bpf_text = bpf_text.replace('STATE_FIELD', 'state')
 
 # set stack storage size
 bpf_text = bpf_text.replace('STACK_STORAGE_SIZE', str(args.stack_storage_size))
@@ -242,12 +246,13 @@ need_delimiter = args.delimited and not (args.kernel_stacks_only or
 if args.kernel_threads_only and args.user_stacks_only:
     print("ERROR: Displaying user stacks for kernel threads " +
           "doesn't make sense.", file=stderr)
-    exit(1)
+    exit(2)
 
 if debug or args.ebpf:
     print(bpf_text)
     if args.ebpf:
-        exit()
+        print("ERROR: Exiting")
+        exit(3)
 
 # initialize BPF
 b = BPF(text=bpf_text)
@@ -256,7 +261,7 @@ b.attach_kprobe(event_re="^finish_task_switch$|^finish_task_switch\.isra\.\d$",
 matched = b.num_open_kprobes()
 if matched == 0:
     print("error: 0 functions traced. Exiting.", file=stderr)
-    exit(1)
+    exit(4)
 
 # header
 if not folded:

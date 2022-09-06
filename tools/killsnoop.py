@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # @lint-avoid-python-3-compatibility-imports
 #
 # killsnoop Trace signals issued by the kill() syscall.
@@ -46,14 +46,14 @@ bpf_text = """
 #include <linux/sched.h>
 
 struct val_t {
-   u64 pid;
+   u32 pid;
    int sig;
    int tpid;
    char comm[TASK_COMM_LEN];
 };
 
 struct data_t {
-   u64 pid;
+   u32 pid;
    int tpid;
    int sig;
    int ret;

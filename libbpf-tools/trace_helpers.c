@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <bpf/bpf.h>
 #include <bpf/btf.h>
 #include <bpf/libbpf.h>
 #include <limits.h>
@@ -967,16 +968,6 @@ unsigned long long get_ktime_ns(void)
 	return ts.tv_sec * NSEC_PER_SEC + ts.tv_nsec;
 }
 
-int bump_memlock_rlimit(void)
-{
-	struct rlimit rlim_new = {
-		.rlim_cur	= RLIM_INFINITY,
-		.rlim_max	= RLIM_INFINITY,
-	};
-
-	return setrlimit(RLIMIT_MEMLOCK, &rlim_new);
-}
-
 bool is_kernel_module(const char *name)
 {
 	bool found = false;
@@ -1000,27 +991,57 @@ bool is_kernel_module(const char *name)
 	return found;
 }
 
-bool fentry_exists(const char *name, const char *mod)
+static bool fentry_try_attach(int id)
+{
+	int prog_fd, attach_fd;
+	char error[4096];
+	struct bpf_insn insns[] = {
+		{ .code = BPF_ALU64 | BPF_MOV | BPF_K, .dst_reg = BPF_REG_0, .imm = 0 },
+		{ .code = BPF_JMP | BPF_EXIT },
+	};
+	LIBBPF_OPTS(bpf_prog_load_opts, opts,
+			.expected_attach_type = BPF_TRACE_FENTRY,
+			.attach_btf_id = id,
+			.log_buf = error,
+			.log_size = sizeof(error),
+	);
+
+	prog_fd = bpf_prog_load(BPF_PROG_TYPE_TRACING, "test", "GPL", insns,
+			sizeof(insns) / sizeof(struct bpf_insn), &opts);
+	if (prog_fd < 0) {
+		fprintf(stderr, "failed to try attaching to fentry: %s\n", error);
+		return false;
+	}
+
+	attach_fd = bpf_raw_tracepoint_open(NULL, prog_fd);
+	if (attach_fd >= 0)
+		close(attach_fd);
+
+	close(prog_fd);
+	return attach_fd >= 0;
+}
+
+bool fentry_can_attach(const char *name, const char *mod)
 {
 	const char sysfs_vmlinux[] = "/sys/kernel/btf/vmlinux";
 	struct btf *base, *btf = NULL;
-	const struct btf_type *type;
-	const struct btf_enum *e;
 	char sysfs_mod[80];
-	int id = -1, i;
+	int id = -1, err;
 
 	base = btf__parse(sysfs_vmlinux, NULL);
-	if (libbpf_get_error(base)) {
+	if (!base) {
+		err = -errno;
 		fprintf(stderr, "failed to parse vmlinux BTF at '%s': %s\n",
-			sysfs_vmlinux, strerror(-libbpf_get_error(base)));
+			sysfs_vmlinux, strerror(-err));
 		goto err_out;
 	}
 	if (mod && module_btf_exists(mod)) {
 		snprintf(sysfs_mod, sizeof(sysfs_mod), "/sys/kernel/btf/%s", mod);
 		btf = btf__parse_split(sysfs_mod, base);
-		if (libbpf_get_error(btf)) {
+		if (!btf) {
+			err = -errno;
 			fprintf(stderr, "failed to load BTF from %s: %s\n",
-				sysfs_mod, strerror(-libbpf_get_error(btf)));
+				sysfs_mod, strerror(-err));
 			btf = base;
 			base = NULL;
 		}
@@ -1029,28 +1050,12 @@ bool fentry_exists(const char *name, const char *mod)
 		base = NULL;
 	}
 
-	id = btf__find_by_name_kind(btf, "bpf_attach_type", BTF_KIND_ENUM);
-	if (id < 0)
-		goto err_out;
-	type = btf__type_by_id(btf, id);
-
-	/*
-         * As kernel BTF is exposed starting from 5.4 kernel, but fentry/fexit
-         * is actually supported starting from 5.5, so that's check this gap
-         * first, then check if target func has btf type.
-	 */
-	for (id = -1, i = 0, e = btf_enum(type); i < btf_vlen(type); i++, e++) {
-		if (!strcmp(btf__name_by_offset(btf, e->name_off),
-			    "BPF_TRACE_FENTRY")) {
-			id = btf__find_by_name_kind(btf, name, BTF_KIND_FUNC);
-			break;
-		}
-	}
+	id = btf__find_by_name_kind(btf, name, BTF_KIND_FUNC);
 
 err_out:
 	btf__free(btf);
 	btf__free(base);
-	return id > 0;
+	return id > 0 && fentry_try_attach(id);
 }
 
 bool kprobe_exists(const char *name)

@@ -176,8 +176,7 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	return 0;
 }
 
-int libbpf_print_fn(enum libbpf_print_level level,
-		    const char *format, va_list args)
+static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
 	if (level == LIBBPF_DEBUG && !env.verbose)
 		return 0;
@@ -272,21 +271,16 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 	if (env.user_threads_only && env.kernel_threads_only) {
-		fprintf(stderr, "user_threads_only, kernel_threads_only cann't be used together.\n");
+		fprintf(stderr, "user_threads_only and kernel_threads_only cannot be used together.\n");
 		return 1;
 	}
 	if (env.min_block_time >= env.max_block_time) {
-		fprintf(stderr, "min_block_time should smaller than max_block_time\n");
+		fprintf(stderr, "min_block_time should be smaller than max_block_time\n");
 		return 1;
 	}
 
+	libbpf_set_strict_mode(LIBBPF_STRICT_ALL);
 	libbpf_set_print(libbpf_print_fn);
-
-	err = bump_memlock_rlimit();
-	if (err) {
-		fprintf(stderr, "failed to increase rlimit: %d\n", err);
-		return 1;
-	}
 
 	obj = offcputime_bpf__open();
 	if (!obj) {

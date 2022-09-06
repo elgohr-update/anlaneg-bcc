@@ -1,10 +1,10 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # @lint-avoid-python-3-compatibility-imports
 #
 # tcpconnlat    Trace TCP active connection latency (connect).
 #               For Linux, uses BCC, eBPF. Embedded C.
 #
-# USAGE: tcpconnlat [-h] [-t] [-p PID]
+# USAGE: tcpconnlat [-h] [-t] [-p PID] [-4 | -6]
 #
 # This uses dynamic tracing of kernel functions, and will need to be updated
 # to match kernel changes.
@@ -40,6 +40,8 @@ examples = """examples:
     ./tcpconnlat -t        # include timestamps
     ./tcpconnlat -p 181    # only trace PID 181
     ./tcpconnlat -L        # include LPORT while printing outputs
+    ./tcpconnlat -4        # trace IPv4 family only
+    ./tcpconnlat -6        # trace IPv6 family only
 """
 parser = argparse.ArgumentParser(
     description="Trace TCP connects and show connection latency",
@@ -51,6 +53,11 @@ parser.add_argument("-p", "--pid",
     help="trace this PID only")
 parser.add_argument("-L", "--lport", action="store_true",
     help="include LPORT on output")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("-4", "--ipv4", action="store_true",
+    help="trace IPv4 family only")
+group.add_argument("-6", "--ipv6", action="store_true",
+    help="trace IPv6 family only")
 parser.add_argument("duration_ms", nargs="?", default=0,
     type=positive_float,
     help="minimum duration to trace (ms)")
@@ -202,8 +209,14 @@ if debug or args.verbose or args.ebpf:
 
 # initialize BPF
 b = BPF(text=bpf_text)
-b.attach_kprobe(event="tcp_v4_connect", fn_name="trace_connect")
-b.attach_kprobe(event="tcp_v6_connect", fn_name="trace_connect")
+if args.ipv4:
+    b.attach_kprobe(event="tcp_v4_connect", fn_name="trace_connect")
+elif args.ipv6:
+    b.attach_kprobe(event="tcp_v6_connect", fn_name="trace_connect")
+else:
+    b.attach_kprobe(event="tcp_v4_connect", fn_name="trace_connect")
+    b.attach_kprobe(event="tcp_v6_connect", fn_name="trace_connect")
+
 b.attach_kprobe(event="tcp_rcv_state_process",
     fn_name="trace_tcp_rcv_state_process")
 
@@ -218,13 +231,13 @@ def print_ipv4_event(cpu, data, size):
             start_ts = event.ts_us
         print("%-9.3f" % ((float(event.ts_us) - start_ts) / 1000000), end="")
     if args.lport:
-        print("%-6d %-12.12s %-2d %-16s %-6d %-16s %-5d %.2f" % (event.pid,
+        print("%-7d %-12.12s %-2d %-16s %-6d %-16s %-5d %.2f" % (event.pid,
             event.task.decode('utf-8', 'replace'), event.ip,
             inet_ntop(AF_INET, pack("I", event.saddr)), event.lport,
             inet_ntop(AF_INET, pack("I", event.daddr)), event.dport,
             float(event.delta_us) / 1000))
     else:
-        print("%-6d %-12.12s %-2d %-16s %-16s %-5d %.2f" % (event.pid,
+        print("%-7d %-12.12s %-2d %-16s %-16s %-5d %.2f" % (event.pid,
             event.task.decode('utf-8', 'replace'), event.ip,
             inet_ntop(AF_INET, pack("I", event.saddr)),
             inet_ntop(AF_INET, pack("I", event.daddr)), event.dport,
@@ -238,13 +251,13 @@ def print_ipv6_event(cpu, data, size):
             start_ts = event.ts_us
         print("%-9.3f" % ((float(event.ts_us) - start_ts) / 1000000), end="")
     if args.lport:
-        print("%-6d %-12.12s %-2d %-16s %-6d %-16s %-5d %.2f" % (event.pid,
+        print("%-7d %-12.12s %-2d %-16s %-6d %-16s %-5d %.2f" % (event.pid,
             event.task.decode('utf-8', 'replace'), event.ip,
             inet_ntop(AF_INET6, event.saddr), event.lport,
             inet_ntop(AF_INET6, event.daddr),
             event.dport, float(event.delta_us) / 1000))
     else:
-        print("%-6d %-12.12s %-2d %-16s %-16s %-5d %.2f" % (event.pid,
+        print("%-7d %-12.12s %-2d %-16s %-16s %-5d %.2f" % (event.pid,
             event.task.decode('utf-8', 'replace'), event.ip,
             inet_ntop(AF_INET6, event.saddr), inet_ntop(AF_INET6, event.daddr),
             event.dport, float(event.delta_us) / 1000))
@@ -253,15 +266,21 @@ def print_ipv6_event(cpu, data, size):
 if args.timestamp:
     print("%-9s" % ("TIME(s)"), end="")
 if args.lport:
-    print("%-6s %-12s %-2s %-16s %-6s %-16s %-5s %s" % ("PID", "COMM",
+    print("%-7s %-12s %-2s %-16s %-6s %-16s %-5s %s" % ("PID", "COMM",
         "IP", "SADDR", "LPORT", "DADDR", "DPORT", "LAT(ms)"))
 else:
-    print("%-6s %-12s %-2s %-16s %-16s %-5s %s" % ("PID", "COMM", "IP",
+    print("%-7s %-12s %-2s %-16s %-16s %-5s %s" % ("PID", "COMM", "IP",
         "SADDR", "DADDR", "DPORT", "LAT(ms)"))
 
 # read events
-b["ipv4_events"].open_perf_buffer(print_ipv4_event)
-b["ipv6_events"].open_perf_buffer(print_ipv6_event)
+if args.ipv4:
+    b["ipv4_events"].open_perf_buffer(print_ipv4_event)
+elif args.ipv6:
+    b["ipv6_events"].open_perf_buffer(print_ipv6_event)
+else:
+    b["ipv4_events"].open_perf_buffer(print_ipv4_event)
+    b["ipv6_events"].open_perf_buffer(print_ipv6_event)
+
 while 1:
     try:
         b.perf_buffer_poll()

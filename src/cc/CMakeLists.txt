@@ -89,6 +89,7 @@ set_target_properties(bcc-shared PROPERTIES VERSION ${REVISION_LAST} SOVERSION 0
 set_target_properties(bcc-shared PROPERTIES OUTPUT_NAME bcc)
 
 if(ENABLE_USDT)
+  add_definitions(-DEXPORT_USDT)
   set(bcc_usdt_sources usdt/usdt.cc usdt/usdt_args.cc)
   # else undefined
 endif()
@@ -122,7 +123,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${llvm_lib_exclude_f
 
 # bcc_common_libs_for_a for archive libraries
 # bcc_common_libs_for_s for shared libraries
-set(bcc_common_libs b_frontend clang_frontend
+set(bcc_common_libs clang_frontend
   -Wl,--whole-archive ${clang_libs} ${llvm_libs} -Wl,--no-whole-archive
   ${LIBELF_LIBRARIES})
 if (LIBDEBUGINFOD_FOUND)
@@ -130,7 +131,7 @@ if (LIBDEBUGINFOD_FOUND)
 endif (LIBDEBUGINFOD_FOUND)
 set(bcc_common_libs_for_a ${bcc_common_libs})
 set(bcc_common_libs_for_s ${bcc_common_libs})
-set(bcc_common_libs_for_lua b_frontend clang_frontend
+set(bcc_common_libs_for_lua clang_frontend
   ${clang_libs} ${llvm_libs} ${LIBELF_LIBRARIES})
 if(LIBBPF_FOUND)
   list(APPEND bcc_common_libs_for_a ${LIBBPF_LIBRARIES})

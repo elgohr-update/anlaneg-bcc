@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # deadlock  Detects potential deadlocks (lock order inversions)
 #           on a running process. For Linux, uses BCC, eBPF.
@@ -477,8 +477,8 @@ def main():
 
     with open('deadlock.c') as f:
         text = f.read()
-    text = text.replace(b'MAX_THREADS', str(args.threads));
-    text = text.replace(b'MAX_EDGES', str(args.edges));
+    text = text.replace('MAX_THREADS', str(args.threads));
+    text = text.replace('MAX_EDGES', str(args.edges));
     bpf = BPF(text=text)
 
     # Trace where threads are created
